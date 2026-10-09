@@ -33,12 +33,37 @@ app.use(cors({
   credentials: true
 }));
 
-// MongoDB Connection
-const mongoURI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/lms_db';
+// MongoDB Connection String Resolution & Sanitization
+let rawURI = process.env.MONGO_URI || process.env.MONGODB_URI || process.env.MONGO_URL || process.env.DATABASE_URL || '';
+rawURI = rawURI.trim();
+// Strip accidental surrounding single or double quotes
+if ((rawURI.startsWith('"') && rawURI.endsWith('"')) || (rawURI.startsWith("'") && rawURI.endsWith("'"))) {
+  rawURI = rawURI.slice(1, -1).trim();
+}
 
-mongoose.connect(mongoURI)
-  .then(() => console.log('MongoDB connected successfully to:', mongoURI.includes('@') ? 'MongoDB Atlas Cloud' : 'Local MongoDB'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+const mongoURI = rawURI || 'mongodb://127.0.0.1:27017/lms_db';
+
+// Mask password for safe logging
+const maskedURI = mongoURI.replace(/:([^@/]+)@/, ':****@');
+console.log(`[Database] Connecting to: ${maskedURI}`);
+
+mongoose.connect(mongoURI, {
+  serverSelectionTimeoutMS: 15000,
+})
+  .then(() => {
+    console.log(`[Database] Connected successfully to: ${mongoURI.includes('@') ? 'MongoDB Atlas Cloud' : 'Local MongoDB'}`);
+  })
+  .catch((err) => {
+    console.error(`[Database Error] Code: ${err.code || 'N/A'}, Name: ${err.name}`);
+    console.error(`[Database Error] Details: ${err.message}`);
+    if (mongoURI.includes('127.0.0.1')) {
+      console.error(`[Database Hint] MONGO_URI environment variable is missing on Render! Add MONGO_URI under the Environment tab.`);
+    } else if (err.message.includes('bad auth') || err.message.includes('Authentication failed')) {
+      console.error(`[Database Hint] Atlas username/password is incorrect. Check Atlas -> Database Access -> Edit user password.`);
+    } else if (err.message.includes('Server selection timed out') || err.message.includes('ETIMEDOUT')) {
+      console.error(`[Database Hint] Atlas IP whitelist blocked Render. Check Atlas -> Network Access -> Add IP Address 0.0.0.0/0.`);
+    }
+  });
 
 // Root & Healthcheck endpoints for Render
 app.get('/', (req, res) => {
